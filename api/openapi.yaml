@@ -1,0 +1,431 @@
+openapi: 3.0.3
+info:
+  title: NVXO Ecosystem API
+  description: |
+    Unified REST API for the NVXO ecosystem.
+    All endpoints require an API key unless marked public.
+    Base URL: https://api.nvxo.io/v1
+  version: "1.0.0"
+  contact:
+    name: NVXO Developer Support
+    email: dev@nvxo.io
+    url: https://github.com/NVXO-public/docs
+
+servers:
+  - url: https://api.nvxo.io/v1
+    description: Production
+  - url: https://testnet-api.nvxo.io/v1
+    description: Testnet (free)
+
+security:
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Bearer <api_key>"
+  schemas:
+    Error:
+      type: object
+      properties:
+        code: { type: integer }
+        message: { type: string }
+    Market:
+      type: object
+      properties:
+        symbol: { type: string, example: "BTC/USDT" }
+        base: { type: string }
+        quote: { type: string }
+        lastPrice: { type: number }
+        volume24h: { type: number }
+        change24h: { type: number }
+    Order:
+      type: object
+      properties:
+        orderId: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [buy, sell] }
+        type: { type: string, enum: [market, limit, stop_limit, oco] }
+        price: { type: number }
+        quantity: { type: number }
+        status: { type: string, enum: [open, filled, cancelled, partial] }
+    Transaction:
+      type: object
+      properties:
+        txHash: { type: string }
+        from: { type: string }
+        to: { type: string }
+        value: { type: string }
+        blockNumber: { type: integer }
+        timestamp: { type: integer }
+        status: { type: string, enum: [success, failed, pending] }
+
+paths:
+  # ── MARKETS ──────────────────────────────────────────────────
+  /markets:
+    get:
+      summary: List all trading markets
+      tags: [CEX - Markets]
+      security: []
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string, enum: [spot, futures, margin] }
+      responses:
+        "200":
+          description: List of markets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Market" }
+
+  /markets/{symbol}/orderbook:
+    get:
+      summary: Get order book for a market
+      tags: [CEX - Markets]
+      security: []
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema: { type: string, example: "BTC-USDT" }
+        - name: depth
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Order book snapshot
+
+  /markets/{symbol}/trades:
+    get:
+      summary: Recent trades
+      tags: [CEX - Markets]
+      security: []
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 1000 }
+      responses:
+        "200":
+          description: List of recent trades
+
+  # ── ORDERS ───────────────────────────────────────────────────
+  /orders:
+    post:
+      summary: Place a new order
+      tags: [CEX - Trading]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, side, type, quantity]
+              properties:
+                symbol: { type: string, example: "BTC/USDT" }
+                side: { type: string, enum: [buy, sell] }
+                type: { type: string, enum: [market, limit, stop_limit, oco] }
+                quantity: { type: number }
+                price: { type: number, description: "Required for limit/stop" }
+                stopPrice: { type: number }
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "400":
+          description: Invalid order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+    get:
+      summary: List open orders
+      tags: [CEX - Trading]
+      parameters:
+        - name: symbol
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, filled, cancelled, all] }
+      responses:
+        "200":
+          description: List of orders
+
+  /orders/{orderId}:
+    delete:
+      summary: Cancel an order
+      tags: [CEX - Trading]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Order cancelled
+
+  # ── ACCOUNT ──────────────────────────────────────────────────
+  /account:
+    get:
+      summary: Get account overview
+      tags: [Account]
+      responses:
+        "200":
+          description: Account balances and info
+
+  /account/balances:
+    get:
+      summary: Get all balances
+      tags: [Account]
+      responses:
+        "200":
+          description: Asset balances
+
+  # ── DEX ──────────────────────────────────────────────────────
+  /dex/pools:
+    get:
+      summary: List all liquidity pools
+      tags: [DEX]
+      security: []
+      parameters:
+        - name: chain
+          in: query
+          schema: { type: string, example: "ethereum" }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [tvl, volume, apr] }
+      responses:
+        "200":
+          description: Pool list with stats
+
+  /dex/quote:
+    get:
+      summary: Get swap quote
+      tags: [DEX]
+      security: []
+      parameters:
+        - name: tokenIn
+          in: query
+          required: true
+          schema: { type: string }
+        - name: tokenOut
+          in: query
+          required: true
+          schema: { type: string }
+        - name: amountIn
+          in: query
+          required: true
+          schema: { type: string }
+        - name: slippage
+          in: query
+          schema: { type: number, default: 0.5 }
+      responses:
+        "200":
+          description: Swap quote with route and price impact
+
+  /dex/swap:
+    post:
+      summary: Execute a token swap
+      tags: [DEX]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tokenIn, tokenOut, amountIn, minAmountOut, walletAddress]
+              properties:
+                tokenIn: { type: string }
+                tokenOut: { type: string }
+                amountIn: { type: string }
+                minAmountOut: { type: string }
+                walletAddress: { type: string }
+                deadline: { type: integer }
+      responses:
+        "200":
+          description: Swap transaction data (unsigned)
+
+  # ── EXPLORER ─────────────────────────────────────────────────
+  /explorer/tx/{hash}:
+    get:
+      summary: Get transaction details
+      tags: [Explorer]
+      security: []
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Full transaction details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transaction" }
+
+  /explorer/address/{address}:
+    get:
+      summary: Get address overview
+      tags: [Explorer]
+      security: []
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Address balances, labels, stats
+
+  /explorer/address/{address}/txs:
+    get:
+      summary: Get transaction history for address
+      tags: [Explorer]
+      security: []
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 25, maximum: 100 }
+      responses:
+        "200":
+          description: Paginated transaction history
+
+  /explorer/block/{number}:
+    get:
+      summary: Get block details
+      tags: [Explorer]
+      security: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Block details
+
+  /explorer/stats:
+    get:
+      summary: Network statistics
+      tags: [Explorer]
+      security: []
+      responses:
+        "200":
+          description: Network health metrics
+
+  /explorer/gas:
+    get:
+      summary: Current gas prices
+      tags: [Explorer]
+      security: []
+      responses:
+        "200":
+          description: Gas price estimates (slow/standard/fast)
+
+  # ── WALLET / BRIDGE ──────────────────────────────────────────
+  /bridge/quote:
+    get:
+      summary: Get bridge transfer quote
+      tags: [Bridge]
+      security: []
+      parameters:
+        - name: fromChain
+          in: query
+          required: true
+          schema: { type: string }
+        - name: toChain
+          in: query
+          required: true
+          schema: { type: string }
+        - name: asset
+          in: query
+          required: true
+          schema: { type: string }
+        - name: amount
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Bridge quote with fee and estimated time
+
+  /bridge/transfer:
+    post:
+      summary: Initiate a cross-chain transfer
+      tags: [Bridge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromChain, toChain, asset, amount, recipient]
+              properties:
+                fromChain: { type: string }
+                toChain: { type: string }
+                asset: { type: string }
+                amount: { type: string }
+                recipient: { type: string }
+      responses:
+        "200":
+          description: Bridge transfer initiated — returns unsigned tx
+
+  # ── TOKENIZATION ─────────────────────────────────────────────
+  /tokenization/assets:
+    get:
+      summary: List tokenized real-world assets
+      tags: [Tokenization]
+      parameters:
+        - name: assetClass
+          in: query
+          schema: { type: string, enum: [real-estate, bond, equity, commodity, fund] }
+      responses:
+        "200":
+          description: List of tokenized assets with details
+
+  /tokenization/assets/{tokenId}/holders:
+    get:
+      summary: Get token holder list
+      tags: [Tokenization]
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Holder list (requires KYC verification)
+
+tags:
+  - name: CEX - Markets
+    description: Public market data endpoints
+  - name: CEX - Trading
+    description: Authenticated trading endpoints
+  - name: Account
+    description: Account and balance management
+  - name: DEX
+    description: Decentralized exchange — swaps and liquidity
+  - name: Explorer
+    description: Blockchain explorer data
+  - name: Bridge
+    description: Cross-chain bridge operations
+  - name: Tokenization
+    description: Real-world asset token data
